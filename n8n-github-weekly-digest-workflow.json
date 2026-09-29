@@ -1,0 +1,290 @@
+{
+  "name": "Bản tin tổng hợp GitHub Repositories hàng tuần (Production Ready)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "node-manual-trigger",
+      "name": "Chạy thử nghiệm thủ công",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [780, 240]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [1],
+              "triggerAtHour": 8
+            }
+          ]
+        }
+      },
+      "id": "node-schedule-trigger",
+      "name": "Lịch chạy 08:00 Thứ Hai",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [780, 420]
+    },
+    {
+      "parameters": {
+        "jsCode": "const SO_NGAY_LUI = 7;\nconst ngayGioiHan = new Date(Date.now() - SO_NGAY_LUI * 24 * 60 * 60 * 1000)\n  .toISOString()\n  .split('T')[0];\n\nconst DANH_SACH_CHU_DE = [\n  { chude: 'AI Agents', truyvan: `topic:ai-agent created:>${ngayGioiHan} stars:>10 fork:false` },\n  { chude: 'RAG & Vector Search', truyvan: `topic:rag created:>${ngayGioiHan} stars:>10 fork:false` },\n  { chude: 'Developer Tools', truyvan: `topic:developer-tools created:>${ngayGioiHan} stars:>20 fork:false` }\n];\n\nreturn DANH_SACH_CHU_DE.map((item) => ({ json: item }));"
+      },
+      "id": "node-define-topics",
+      "name": "Khai báo chủ đề tìm kiếm",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1080, 340]
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/search/repositories",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "={{ $json.truyvan }}"
+            },
+            {
+              "name": "sort",
+              "value": "stars"
+            },
+            {
+              "name": "order",
+              "value": "desc"
+            },
+            {
+              "name": "per_page",
+              "value": "15"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "n8n-github-digest-agent"
+            },
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            }
+          ]
+        }
+      },
+      "id": "node-github-search",
+      "name": "Tìm kiếm trên GitHub API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1360, 340],
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.daGuiRepoIds = staticData.daGuiRepoIds || [];\n\nconst SO_LUONG_TOI_DA = 15;\nconst tapHopTrunLapLanNay = new Set();\nconst danhSachRepoHopLe = [];\n\nfor (const item of $input.all()) {\n  const duLieu = item.json || {};\n  const cacRepo = duLieu.items || [];\n\n  for (const repo of cacRepo) {\n    const id = repo.id;\n    if (!id) continue;\n\n    if (staticData.daGuiRepoIds.includes(id)) continue;\n    if (tapHopTrunLapLanNay.has(id)) continue;\n\n    const moTa = (repo.description || '').trim();\n    if (repo.fork || moTa.length < 20) continue;\n\n    tapHopTrunLapLanNay.add(id);\n    danhSachRepoHopLe.push({\n      id: id,\n      ten: repo.full_name,\n      duongDan: repo.html_url,\n      moTa: moTa,\n      stars: repo.stargazers_count || 0,\n      forks: repo.forks_count || 0,\n      ngonNgu: repo.language || 'Đa ngôn ngữ',\n      chuDe: (repo.topics || []).slice(0, 5).join(', ')\n    });\n  }\n}\n\ndanhSachRepoHopLe.sort((a, b) => b.stars - a.stars);\nconst topRepo = danhSachRepoHopLe.slice(0, SO_LUONG_TOI_DA);\n\nconst idMoi = topRepo.map(r => r.id);\nstaticData.daGuiRepoIds = [...staticData.daGuiRepoIds, ...idMoi].slice(-500);\n\nconst vanBanNguCanh = topRepo\n  .map((r, i) => `${i + 1}. [${r.ten}](${r.duongDan})\\n   - Stars: ${r.stars} | Ngôn ngữ: ${r.ngonNgu}\\n   - Thẻ: ${r.chuDe || 'Không'}\\n   - Mô tả gốc: ${r.moTa}`)\n  .join('\\n\\n');\n\nconst homNay = new Date().toISOString().slice(0, 10);\n\nreturn [{\n  json: {\n    tongSoRepo: topRepo.length,\n    ngayTongHop: homNay,\n    vanBanNguCanh: vanBanNguCanh\n  }\n}];"
+      },
+      "id": "node-filter-rank",
+      "name": "Lọc Rác & Gom Nội Dung",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1660, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.tongSoRepo }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "node-check-empty",
+      "name": "Kiểm tra có repo mới không?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1940, 340]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "qwen/qwen3-30b-a3b-instruct-2507",
+          "mode": "list",
+          "cachedResultName": "QWEN/QWEN3-30B-A3B-INSTRUCT-2507"
+        },
+        "responses": {
+          "values": [
+            {
+              "content": "=Dưới đây là danh sách {{ $json.tongSoRepo }} GitHub Repositories mới nổi bật trong tuần (Ngày {{ $json.ngayTongHop }}):\n\n--- DANH SÁCH REPOSITORIES ---\n{{ $json.vanBanNguCanh }}\n--- KẾT THÚC DANH SÁCH ---\n\nHãy biên soạn thành nội dung HTML bản tin theo đúng yêu cầu."
+            }
+          ]
+        },
+        "options": {
+          "instructions": "Bạn là một chuyên gia công nghệ và mã nguồn mở. Nhiệm vụ của bạn là tiếp nhận danh sách các repository mới và biên tập thành một bản tin tuần dạng HTML fragment (chỉ trả về phần nội dung, không có thẻ <html> hoặc <body>).\n\nQuy tắc:\n1. Mở đầu bằng một đoạn ngắn <p style=\"color:#475569; font-size:15px; margin-bottom:24px;\"> tóm lược ngắn gọn xu hướng công nghệ nổi bật trong tuần.\n2. Gom các repository thành 2-3 chuyên mục phù hợp (ví dụ: <h2>AI Agents & Tự động hóa</h2>, <h2>Công cụ Lập trình</h2>, <h2>Hạ tầng Dữ liệu</h2>).\n3. Trong mỗi chuyên mục, trình bày từng repository:\n   - Tiêu đề có link: <a href=\"URL\" style=\"color:#2563eb; font-weight:bold; font-size:16px; text-decoration:none;\">Tên_Repo</a> <span style=\"color:#64748b; font-size:13px;\">(Stars · Ngôn ngữ)</span>\n   - Tóm tắt use-case: 1-2 câu giải thích dự án này sinh ra để giải quyết vấn đề gì và ai nên dùng.\n4. Giữ nguyên 100% link gốc. Không sinh markdown code block (như ```html) và không có lời chào kết sáo rỗng.",
+          "maxTokens": 4000,
+          "temperature": 0.3
+        }
+      },
+      "id": "node-ai-curate",
+      "name": "AI Phân tích & Biên tập",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [2260, 320]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "assign-recipient",
+              "name": "nguoiNhan",
+              "type": "string",
+              "value": "your_email@gmail.com"
+            },
+            {
+              "id": "assign-digestDate",
+              "name": "ngayBanTin",
+              "type": "string",
+              "value": "={{ $now.format('cccc, dd LLLL yyyy') }}"
+            },
+            {
+              "id": "assign-html",
+              "name": "emailHtml",
+              "type": "string",
+              "value": "=<!DOCTYPE html>\n<html>\n<body style=\"margin:0;padding:0;background:#f4f5f7;font-family:Arial,sans-serif;color:#1f2933;\">\n  <table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#f4f5f7;padding:24px 0;\">\n    <tr><td align=\"center\">\n      <table role=\"presentation\" width=\"640\" cellpadding=\"0\" cellspacing=\"0\" style=\"background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 6px -1px rgba(0,0,0,0.1);\">\n        <tr><td style=\"background:#0f172a;padding:24px 32px;\">\n          <div style=\"color:#ffffff;font-size:22px;font-weight:bold;\">Bản Tin GitHub Repositories Nổi Bật</div>\n          <div style=\"color:#94a3b8;font-size:13px;margin-top:6px;\">{{ $now.format('cccc, dd LLLL yyyy') }} · Tuyển chọn bởi AI</div>\n        </td></tr>\n        <tr><td style=\"padding:28px 32px;font-size:15px;line-height:1.6;\">\n          {{ $('AI Phân tích & Biên tập').item.json.output[0].content[0].text.replace(/^```html\\s*/i, '').replace(/```\\s*$/i, '').trim() }}\n        </td></tr>\n        <tr><td style=\"padding:18px 32px;border-top:1px solid #e5e7eb;color:#94a3b8;font-size:12px;line-height:1.5;background:#f8fafc;\">\n          Bản tin tự động từ n8n. Không chứa các dự án đã gửi từ tuần trước.\n        </td></tr>\n      </table>\n    </td></tr>\n  </table>\n</body>\n</html>"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "node-build-email",
+      "name": "Tạo giao diện Email HTML",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2580, 320]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.nguoiNhan }}",
+        "subject": "=Bản Tin GitHub Repositories Mới - {{ $json.ngayBanTin }}",
+        "message": "={{ $json.emailHtml }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "id": "node-send-email",
+      "name": "Gửi Email qua Gmail",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [2880, 320]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Chạy thử nghiệm thủ công": {
+      "main": [
+        [
+          {
+            "node": "Khai báo chủ đề tìm kiếm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lịch chạy 08:00 Thứ Hai": {
+      "main": [
+        [
+          {
+            "node": "Khai báo chủ đề tìm kiếm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Khai báo chủ đề tìm kiếm": {
+      "main": [
+        [
+          {
+            "node": "Tìm kiếm trên GitHub API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tìm kiếm trên GitHub API": {
+      "main": [
+        [
+          {
+            "node": "Lọc Rác & Gom Nội Dung",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lọc Rác & Gom Nội Dung": {
+      "main": [
+        [
+          {
+            "node": "Kiểm tra có repo mới không?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Kiểm tra có repo mới không?": {
+      "main": [
+        [
+          {
+            "node": "AI Phân tích & Biên tập",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Phân tích & Biên tập": {
+      "main": [
+        [
+          {
+            "node": "Tạo giao diện Email HTML",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tạo giao diện Email HTML": {
+      "main": [
+        [
+          {
+            "node": "Gửi Email qua Gmail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  }
+}
