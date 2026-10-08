@@ -29,17 +29,24 @@ Tất cả các truy vấn đều tự động lọc repository tạo trong 7 ng
 
 ## Cấu hình workflow trên n8n Cloud
 
-1. Đăng nhập n8n Cloud, tạo workflow mới và import [`n8n-github-weekly-digest-workflow.json`](./n8n-github-weekly-digest-workflow.json).
-2. Tạo **Header Auth** credential cho GitHub:
+1. Đăng nhập n8n Cloud (hoặc self-hosted phiên bản `n8n >= 1.117.0`), tạo workflow mới và import [`n8n-github-weekly-digest-workflow.json`](./n8n-github-weekly-digest-workflow.json).
+2. Lấy **GitHub Token**: Vào GitHub profile $\rightarrow$ **Settings** $\rightarrow$ **Developer settings** $\rightarrow$ **Personal access tokens** $\rightarrow$ Tạo **Fine-grained token** cấp quyền `Public Repositories (read-only)`.
+3. Tạo **Header Auth** credential trong n8n:
+   - Vào **Credentials** $\rightarrow$ **Add Credential** $\rightarrow$ chọn **Header Auth**.
    - **Name:** `Authorization`
-   - **Value:** `Bearer <GITHUB_TOKEN>`
-3. Chọn Header Auth credential trong node `Tìm kiếm trên GitHub API`.
-4. Chọn OpenAI credential trong node `AI Phân tích & Biên tập` (chọn model `gpt-4o-mini`).
-5. Chọn Gmail credential trong node `Gửi Email qua Gmail`.
-6. Thay `your_email@gmail.com` bằng địa chỉ email người nhận trong node `Tạo giao diện Email HTML`.
-7. Kiểm tra timezone `Asia/Ho_Chi_Minh` trong Workflow Settings.
-8. Chạy Manual Trigger để kiểm tra từng node.
-9. Lưu và **Publish** workflow để Schedule Trigger và static data hoạt động tự động.
+   - **Value:** `Bearer <GITHUB_TOKEN>` (Gõ từ `Bearer`, một dấu cách trắng, rồi dán token).
+   - Bấm **Save**.
+4. Gắn credential vào node HTTP Request:
+   - Mở node `Tìm kiếm trên GitHub API`.
+   - Đổi **Authentication** từ `None` sang **Generic Credential Type**.
+   - Chọn **Generic Auth Type:** `Header Auth`.
+   - Chọn credential `Authorization` vừa tạo.
+5. Chọn OpenAI credential trong node `AI Phân tích & Biên tập` (chọn model `gpt-4o-mini`).
+6. Chọn Gmail credential trong node `Gửi Email qua Gmail`.
+7. Thay `your_email@gmail.com` bằng địa chỉ email người nhận trong node `Tạo giao diện Email HTML`.
+8. Kiểm tra timezone `Asia/Ho_Chi_Minh` trong Workflow Settings.
+9. Chạy Manual Trigger để kiểm tra từng node.
+10. Lưu và **Publish** workflow để Schedule Trigger và static data hoạt động tự động.
 
 ## Cơ chế chống gửi trùng hai lớp & Transactional Commit
 
