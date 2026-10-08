@@ -1,31 +1,60 @@
 # n8n GitHub Weekly Digest
 
-Workflow n8n tìm các repository GitHub mới theo chủ đề, lọc kết quả, dùng AI để tóm tắt và gửi bản tin HTML qua Gmail.
+Workflow tự động tìm kiếm repository GitHub mới theo từng chủ đề công nghệ, loại trùng hai lớp, sử dụng OpenAI (`gpt-4o-mini`) biên tập bản tin và gửi email HTML qua Gmail.
 
-## Các bước chính
+Repository chính thức: [github.com/ananh31300/n8n-github-weekly-digest](https://github.com/ananh31300/n8n-github-weekly-digest)
 
-1. Kích hoạt thủ công hoặc theo lịch hằng tuần.
-2. Tạo danh sách truy vấn GitHub theo chủ đề.
-3. Gọi GitHub Search API.
-4. Loại bản fork, repository thiếu mô tả và mục đã gửi trước đó.
-5. Dùng mô hình AI để phân nhóm và tóm tắt.
-6. Tạo email HTML và gửi qua Gmail.
+## Yêu cầu
 
-## Cách import
+- Một workspace n8n Cloud đang hoạt động (hoặc n8n self-hosted).
+- GitHub Personal Access Token (classic hoặc fine-grained).
+- OpenAI API Key (model `gpt-4o-mini`).
+- Google OAuth2 credential có quyền gửi Gmail (`https://mail.google.com/`).
+- Workflow timezone: `Asia/Ho_Chi_Minh`.
 
-1. Tải file [`n8n-github-weekly-digest-workflow.json`](./n8n-github-weekly-digest-workflow.json).
-2. Mở n8n và chọn **Import from File**.
-3. Chọn file JSON vừa tải.
-4. Cấu hình credential cho OpenAI và Gmail.
-5. Thay `your_email@gmail.com` bằng địa chỉ nhận bản tin.
-6. Chạy thử bằng node Manual Trigger trước khi bật lịch tự động.
+Tài liệu này chỉ hướng dẫn cấu hình và vận hành workflow trên n8n Cloud. Việc đăng ký tài khoản, cài đặt n8n hoặc quản trị hạ tầng máy chủ không nằm trong phạm vi tài liệu.
 
-## Lưu ý
+## Các chủ đề theo dõi (6 truy vấn)
 
-- File không chứa API key, access token hoặc credential n8n.
-- GitHub API có giới hạn số request. Có thể thêm token GitHub vào HTTP Request node nếu cần hạn mức cao hơn.
-- Kiểm tra múi giờ của n8n trước khi bật Schedule Trigger.
+Workflow phân tách thành 6 truy vấn độc lập để tránh lỗi cú pháp GitHub HTTP 422:
 
-## Tệp workflow
+1. **AI Agents**: `topic:ai-agent` (stars > 10)
+2. **MCP**: `topic:mcp` (stars > 5)
+3. **MCP Protocol**: `topic:model-context-protocol` (stars > 5)
+4. **RAG & Vector Search**: `topic:rag language:python` (stars > 10)
+5. **Modern Data Stack (DuckDB)**: `topic:duckdb` (stars > 10)
+6. **Modern Data Stack (Iceberg)**: `topic:apache-iceberg` (stars > 10)
 
-- [Tải workflow JSON](./n8n-github-weekly-digest-workflow.json)
+Tất cả các truy vấn đều tự động lọc repository tạo trong 7 ngày gần nhất, loại bỏ fork (`fork:false`) và repository lưu trữ (`archived:false`).
+
+## Cấu hình workflow trên n8n Cloud
+
+1. Đăng nhập n8n Cloud, tạo workflow mới và import [`n8n-github-weekly-digest-workflow.json`](./n8n-github-weekly-digest-workflow.json).
+2. Tạo **Header Auth** credential cho GitHub:
+   - **Name:** `Authorization`
+   - **Value:** `Bearer <GITHUB_TOKEN>`
+3. Chọn Header Auth credential trong node `Tìm kiếm trên GitHub API`.
+4. Chọn OpenAI credential trong node `AI Phân tích & Biên tập` (chọn model `gpt-4o-mini`).
+5. Chọn Gmail credential trong node `Gửi Email qua Gmail`.
+6. Thay `your_email@gmail.com` bằng địa chỉ email người nhận trong node `Tạo giao diện Email HTML`.
+7. Kiểm tra timezone `Asia/Ho_Chi_Minh` trong Workflow Settings.
+8. Chạy Manual Trigger để kiểm tra từng node.
+9. Lưu và **Publish** workflow để Schedule Trigger và static data hoạt động tự động.
+
+## Cơ chế chống gửi trùng hai lớp & Transactional Commit
+
+Workflow áp dụng cơ chế lọc và ghi nhận an toàn:
+
+1. **Lớp 1 (Nội bộ execution)**: Dùng `Set` loại trùng các repository xuất hiện ở nhiều chủ đề khác nhau trong cùng một lần chạy.
+2. **Lớp 2 (Xuyên suốt các tuần)**: Đọc `$getWorkflowStaticData('global').daGuiRepoIds` trong node lọc để loại bỏ các repository đã gửi ở các lần chạy trước.
+3. **Commit sau khi gửi thành công (Transactional Safety)**: Node lọc **chỉ đọc** và truyền danh sách `topRepoIds`. Việc ghi đè vào `staticData.daGuiRepoIds` chỉ diễn ra tại node `Ghi nhận repo đã gửi thành công` **sau khi** node Gmail đã gửi email thành công. Nếu AI hoặc Gmail gặp sự cố, workflow sẽ dừng và ID repo không bị đánh dấu nhầm, đảm bảo không bỏ sót repo ở các lần chạy sau.
+
+*Lưu ý:* `staticData` chỉ được n8n lưu lại khi chạy Production (thông qua Schedule Trigger hoặc Webhook). Manual Execution trong trình soạn thảo sẽ không lưu trạng thái này.
+
+## Quy trình kiểm thử
+
+- **GitHub API**: Xác nhận tất cả 6 request trả mã HTTP 200.
+- **Lọc & Xếp hạng**: Output trả về tối đa 15 repository có stars cao nhất, không trùng lặp ID.
+- **OpenAI Node**: Sử dụng model `gpt-4o-mini`, temperature `0.3`, trả về HTML fragment chuẩn không kèm markdown block.
+- **Gmail Node**: Gửi email HTML thành công đến hòm thư nhận.
+- **Static Data**: Node cuối ghi nhận danh sách ID mới vào `daGuiRepoIds`.

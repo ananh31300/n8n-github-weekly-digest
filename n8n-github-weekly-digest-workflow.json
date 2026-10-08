@@ -29,7 +29,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const SO_NGAY_LUI = 7;\nconst ngayGioiHan = new Date(Date.now() - SO_NGAY_LUI * 24 * 60 * 60 * 1000)\n  .toISOString()\n  .split('T')[0];\n\nconst DANH_SACH_CHU_DE = [\n  { chude: 'AI Agents', truyvan: `topic:ai-agent created:>${ngayGioiHan} stars:>10 fork:false` },\n  { chude: 'RAG & Vector Search', truyvan: `topic:rag created:>${ngayGioiHan} stars:>10 fork:false` },\n  { chude: 'Developer Tools', truyvan: `topic:developer-tools created:>${ngayGioiHan} stars:>20 fork:false` }\n];\n\nreturn DANH_SACH_CHU_DE.map((item) => ({ json: item }));"
+        "jsCode": "const SO_NGAY_LUI = 7;\nconst ngayGioiHan = new Date(Date.now() - SO_NGAY_LUI * 86400000)\n  .toISOString()\n  .slice(0, 10);\n\n// GitHub OR chỉ áp dụng cho search terms, không áp dụng giữa các qualifier topic:.\n// Mỗi topic thay thế phải là một query riêng; node sau gộp và loại trùng theo repo.id.\nconst DANH_SACH_CHU_DE = [\n  { chude: 'AI Agents', topic: 'ai-agent', saoToiThieu: 10 },\n  { chude: 'MCP', topic: 'mcp', saoToiThieu: 5 },\n  { chude: 'MCP', topic: 'model-context-protocol', saoToiThieu: 5 },\n  { chude: 'RAG', topic: 'rag', saoToiThieu: 10, ngonNgu: 'python' },\n  { chude: 'Modern Data Stack', topic: 'duckdb', saoToiThieu: 10 },\n  { chude: 'Modern Data Stack', topic: 'apache-iceberg', saoToiThieu: 10 }\n];\n\nreturn DANH_SACH_CHU_DE.map(({ chude, topic, saoToiThieu, ngonNgu }) => ({\n  json: {\n    chude,\n    truyvan: `topic:${topic}${ngonNgu ? ` language:${ngonNgu}` : ''} created:>${ngayGioiHan} stars:>${saoToiThieu} fork:false archived:false`\n  }\n}));"
       },
       "id": "node-define-topics",
       "name": "Khai báo chủ đề tìm kiếm",
@@ -39,6 +39,8 @@
     },
     {
       "parameters": {
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "url": "=https://api.github.com/search/repositories",
         "sendQuery": true,
         "queryParameters": {
@@ -76,7 +78,11 @@
             },
             {
               "name": "Accept",
-              "value": "application/vnd.github.v3+json"
+              "value": "application/vnd.github+json"
+            },
+            {
+              "name": "X-GitHub-Api-Version",
+              "value": "2022-11-28"
             }
           ]
         }
@@ -85,15 +91,14 @@
       "name": "Tìm kiếm trên GitHub API",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [1360, 340],
-      "onError": "continueRegularOutput"
+      "position": [1360, 340]
     },
     {
       "parameters": {
-        "jsCode": "const staticData = $getWorkflowStaticData('global');\nstaticData.daGuiRepoIds = staticData.daGuiRepoIds || [];\n\nconst SO_LUONG_TOI_DA = 15;\nconst tapHopTrunLapLanNay = new Set();\nconst danhSachRepoHopLe = [];\n\nfor (const item of $input.all()) {\n  const duLieu = item.json || {};\n  const cacRepo = duLieu.items || [];\n\n  for (const repo of cacRepo) {\n    const id = repo.id;\n    if (!id) continue;\n\n    if (staticData.daGuiRepoIds.includes(id)) continue;\n    if (tapHopTrunLapLanNay.has(id)) continue;\n\n    const moTa = (repo.description || '').trim();\n    if (repo.fork || moTa.length < 20) continue;\n\n    tapHopTrunLapLanNay.add(id);\n    danhSachRepoHopLe.push({\n      id: id,\n      ten: repo.full_name,\n      duongDan: repo.html_url,\n      moTa: moTa,\n      stars: repo.stargazers_count || 0,\n      forks: repo.forks_count || 0,\n      ngonNgu: repo.language || 'Đa ngôn ngữ',\n      chuDe: (repo.topics || []).slice(0, 5).join(', ')\n    });\n  }\n}\n\ndanhSachRepoHopLe.sort((a, b) => b.stars - a.stars);\nconst topRepo = danhSachRepoHopLe.slice(0, SO_LUONG_TOI_DA);\n\nconst idMoi = topRepo.map(r => r.id);\nstaticData.daGuiRepoIds = [...staticData.daGuiRepoIds, ...idMoi].slice(-500);\n\nconst vanBanNguCanh = topRepo\n  .map((r, i) => `${i + 1}. [${r.ten}](${r.duongDan})\\n   - Stars: ${r.stars} | Ngôn ngữ: ${r.ngonNgu}\\n   - Thẻ: ${r.chuDe || 'Không'}\\n   - Mô tả gốc: ${r.moTa}`)\n  .join('\\n\\n');\n\nconst homNay = new Date().toISOString().slice(0, 10);\n\nreturn [{\n  json: {\n    tongSoRepo: topRepo.length,\n    ngayTongHop: homNay,\n    vanBanNguCanh: vanBanNguCanh\n  }\n}];"
+        "jsCode": "// Lưu ý: static data chỉ được đọc ở đây để loại trừ repo đã gửi trong quá khứ.\n// Việc commit/ghi nhớ ID mới chỉ diễn ra ở node cuối sau khi Gmail đã gửi thành công.\nconst staticData = $getWorkflowStaticData('global');\nconst daGuiRepoIds = staticData.daGuiRepoIds || [];\n\nconst SO_LUONG_TOI_DA = 15;\nconst daGapTrongLanNay = new Set();\nconst danhSachRepoHopLe = [];\n\nfor (const item of $input.all()) {\n  for (const repo of item.json?.items || []) {\n    if (!repo.id || daGapTrongLanNay.has(repo.id)) continue;\n    if (daGuiRepoIds.includes(repo.id)) continue;\n\n    const moTa = (repo.description || '').trim();\n    if (repo.fork || repo.archived || moTa.length < 20) continue;\n\n    daGapTrongLanNay.add(repo.id);\n    danhSachRepoHopLe.push({\n      id: repo.id,\n      ten: repo.full_name,\n      duongDan: repo.html_url,\n      moTa,\n      stars: repo.stargazers_count || 0,\n      forks: repo.forks_count || 0,\n      ngonNgu: repo.language || 'Không xác định',\n      chuDe: (repo.topics || []).slice(0, 5).join(', ')\n    });\n  }\n}\n\ndanhSachRepoHopLe.sort((a, b) => b.stars - a.stars);\nconst topRepo = danhSachRepoHopLe.slice(0, SO_LUONG_TOI_DA);\n\nconst vanBanNguCanh = topRepo\n  .map((repo, i) => `${i + 1}. [${repo.ten}](${repo.duongDan})\\n   - Stars: ${repo.stars} | Ngôn ngữ: ${repo.ngonNgu}\\n   - Thẻ: ${repo.chuDe || 'Không'}\\n   - Mô tả gốc: ${repo.moTa}`)\n  .join('\\n\\n');\n\nreturn [{\n  json: {\n    tongSoRepo: topRepo.length,\n    ngayTongHop: new Date().toISOString().slice(0, 10),\n    topRepoIds: topRepo.map(repo => repo.id),\n    vanBanNguCanh\n  }\n}];"
       },
       "id": "node-filter-rank",
-      "name": "Lọc Rác & Gom Nội Dung",
+      "name": "Lọc, loại trùng & gom nội dung",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [1660, 340]
@@ -120,9 +125,9 @@
       "parameters": {
         "modelId": {
           "__rl": true,
-          "value": "qwen/qwen3-30b-a3b-instruct-2507",
+          "value": "gpt-4o-mini",
           "mode": "list",
-          "cachedResultName": "QWEN/QWEN3-30B-A3B-INSTRUCT-2507"
+          "cachedResultName": "GPT-4O-MINI"
         },
         "responses": {
           "values": [
@@ -132,7 +137,7 @@
           ]
         },
         "options": {
-          "instructions": "Bạn là một chuyên gia công nghệ và mã nguồn mở. Nhiệm vụ của bạn là tiếp nhận danh sách các repository mới và biên tập thành một bản tin tuần dạng HTML fragment (chỉ trả về phần nội dung, không có thẻ <html> hoặc <body>).\n\nQuy tắc:\n1. Mở đầu bằng một đoạn ngắn <p style=\"color:#475569; font-size:15px; margin-bottom:24px;\"> tóm lược ngắn gọn xu hướng công nghệ nổi bật trong tuần.\n2. Gom các repository thành 2-3 chuyên mục phù hợp (ví dụ: <h2>AI Agents & Tự động hóa</h2>, <h2>Công cụ Lập trình</h2>, <h2>Hạ tầng Dữ liệu</h2>).\n3. Trong mỗi chuyên mục, trình bày từng repository:\n   - Tiêu đề có link: <a href=\"URL\" style=\"color:#2563eb; font-weight:bold; font-size:16px; text-decoration:none;\">Tên_Repo</a> <span style=\"color:#64748b; font-size:13px;\">(Stars · Ngôn ngữ)</span>\n   - Tóm tắt use-case: 1-2 câu giải thích dự án này sinh ra để giải quyết vấn đề gì và ai nên dùng.\n4. Giữ nguyên 100% link gốc. Không sinh markdown code block (như ```html) và không có lời chào kết sáo rỗng.",
+          "instructions": "Bạn là biên tập viên công nghệ. Hãy biên tập danh sách repository thành HTML fragment, không có thẻ <html> hoặc <body>.\n\nQuy tắc:\n1. Chỉ sử dụng tên, URL, stars, ngôn ngữ, topic và mô tả có trong đầu vào; không bịa tính năng, benchmark hoặc mức độ phổ biến.\n2. Mở đầu bằng một đoạn <p style=\"color:#475569; font-size:15px; margin-bottom:24px;\"> tóm lược xu hướng quan sát được từ chính danh sách.\n3. Gom repository thành 2-3 chuyên mục phù hợp.\n4. Mỗi repository gồm link gốc, stars, ngôn ngữ và 1-2 câu tóm tắt use case dựa trên mô tả gốc.\n5. Giữ nguyên 100% URL. Không trả Markdown code fence và không thêm lời chào kết sáo rỗng.",
           "maxTokens": 4000,
           "temperature": 0.3
         }
@@ -189,6 +194,16 @@
       "type": "n8n-nodes-base.gmail",
       "typeVersion": 2.2,
       "position": [2880, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Chỉ ghi nhận ID vào staticData sau khi Gmail đã gửi thành công.\n// Nếu node OpenAI hoặc Gmail bị lỗi, workflow dừng lại và ID sẽ không bị mất ở lần chạy kế tiếp.\nconst staticData = $getWorkflowStaticData('global');\nstaticData.daGuiRepoIds ??= [];\n\nconst topRepoIds = $('Lọc, loại trùng & gom nội dung').first().json?.topRepoIds || [];\n\nif (topRepoIds.length > 0) {\n  staticData.daGuiRepoIds = [\n    ...new Set([...staticData.daGuiRepoIds, ...topRepoIds])\n  ].slice(-500);\n}\n\nreturn [{\n  json: {\n    trangThai: 'Đã gửi email và lưu static data thành công',\n    soRepoMoiDaGhiNhan: topRepoIds.length,\n    tongSoRepoDaGhiNhan: staticData.daGuiRepoIds.length,\n    thoiGianGhiNhan: new Date().toISOString()\n  }\n}];"
+      },
+      "id": "node-commit-static-data",
+      "name": "Ghi nhận repo đã gửi thành công",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3180, 320]
     }
   ],
   "pinData": {},
@@ -230,14 +245,14 @@
       "main": [
         [
           {
-            "node": "Lọc Rác & Gom Nội Dung",
+            "node": "Lọc, loại trùng & gom nội dung",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "Lọc Rác & Gom Nội Dung": {
+    "Lọc, loại trùng & gom nội dung": {
       "main": [
         [
           {
@@ -280,11 +295,23 @@
           }
         ]
       ]
+    },
+    "Gửi Email qua Gmail": {
+      "main": [
+        [
+          {
+            "node": "Ghi nhận repo đã gửi thành công",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "active": false,
   "settings": {
     "executionOrder": "v1",
-    "binaryMode": "separate"
+    "binaryMode": "separate",
+    "timezone": "Asia/Ho_Chi_Minh"
   }
 }
